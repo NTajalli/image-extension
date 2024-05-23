@@ -1,2 +1,3 @@
-coco_preprocessed/inputs/
-coco_preprocessed/outputs/
+coco_preprocessed/
+images/
+_pycache_/

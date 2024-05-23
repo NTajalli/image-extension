@@ -1,8 +1,6 @@
 import torch
 import torch.nn as nn
-import torch.optim as optim
-from torchvision import models, transforms
-from torchvision.utils import save_image
+from torchvision import models
 
 class SelfAttention(nn.Module):
     def __init__(self, in_dim):
@@ -36,6 +34,7 @@ class Generator(nn.Module):
             nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1),
             nn.BatchNorm2d(256),
             nn.ReLU(inplace=True),
+            SelfAttention(256),
             nn.Conv2d(256, 512, kernel_size=4, stride=2, padding=1),
             nn.BatchNorm2d(512),
             nn.ReLU(inplace=True),
@@ -48,18 +47,35 @@ class Generator(nn.Module):
             nn.ConvTranspose2d(256, 128, kernel_size=4, stride=2, padding=1),
             nn.BatchNorm2d(128),
             nn.ReLU(inplace=True),
+            SelfAttention(128),
             nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=1),
             nn.BatchNorm2d(64),
             nn.ReLU(inplace=True),
-            nn.ConvTranspose2d(64, 3, kernel_size=4, stride=2, padding=1),
+            nn.ConvTranspose2d(64, 32, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(inplace=True),
+            nn.ConvTranspose2d(32, 3, kernel_size=4, stride=2, padding=1),
             nn.Tanh(),
         )
 
     def forward(self, x):
-        x = self.encoder(x)
-        x = self.self_attention(x)
-        x = self.decoder(x)
-        return x
+        enc = self.encoder(x)
+        att = self.self_attention(enc)
+        dec = self.decoder(att)
+    
+        # Initialize output tensor
+        output = torch.zeros(x.size(0), 3, 256, 256, device=x.device)
+
+        # Copy the central 128x128 pixels from input to output
+        output[:, :, 64:192, 64:192] = x
+
+        # Generate the surrounding areas
+        output[:, :, :64, :] = dec[:, :, :64, :]  # Top part
+        output[:, :, 192:, :] = dec[:, :, -64:, :]  # Bottom part (corrected indices)
+        output[:, :, 64:192, :64] = dec[:, :, 64:192, :64]  # Left part
+        output[:, :, 64:192, 192:] = dec[:, :, 64:192, -64:]  # Right part (corrected indices)
+
+        return output
 
 class PatchDiscriminator(nn.Module):
     def __init__(self):
@@ -73,6 +89,7 @@ class PatchDiscriminator(nn.Module):
             nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1),
             nn.BatchNorm2d(256),
             nn.LeakyReLU(0.2, inplace=True),
+            SelfAttention(256),
             nn.Conv2d(256, 512, kernel_size=4, stride=1, padding=1),
             nn.BatchNorm2d(512),
             nn.LeakyReLU(0.2, inplace=True),
@@ -86,7 +103,7 @@ class PatchDiscriminator(nn.Module):
 class PerceptualLoss(nn.Module):
     def __init__(self):
         super(PerceptualLoss, self).__init__()
-        vgg = models.vgg19(pretrained=True).features
+        vgg = models.vgg19(weights=models.VGG19_Weights.IMAGENET1K_V1).features
         self.vgg = nn.Sequential(*list(vgg.children())[:35]).eval()
         for param in self.vgg.parameters():
             param.requires_grad = False
@@ -96,6 +113,3 @@ class PerceptualLoss(nn.Module):
         fake_features = self.vgg(fake)
         real_features = self.vgg(real)
         return self.criterion(fake_features, real_features)
-
-
-
